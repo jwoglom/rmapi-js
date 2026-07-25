@@ -1,9 +1,29 @@
 # rmapi-js
 
-[![build](https://github.com/erikbrinkman/rmapi-js/actions/workflows/build.yml/badge.svg)](https://github.com/erikbrinkman/rmapi-js/actions/workflows/build.yml)
-[![docs](https://img.shields.io/badge/docs-docs-blue)](https://erikbrinkman.github.io/rmapi-js/modules.html)
-[![npm](https://img.shields.io/npm/v/rmapi-js)](https://www.npmjs.com/package/rmapi-js)
-[![license](https://img.shields.io/github/license/erikbrinkman/rmapi-js)](LICENSE)
+[![build](https://github.com/jwoglom/rmapi-js/actions/workflows/build.yml/badge.svg)](https://github.com/jwoglom/rmapi-js/actions/workflows/build.yml)
+[![npm](https://img.shields.io/npm/v/@jwoglom/rmapi-js)](https://www.npmjs.com/package/@jwoglom/rmapi-js)
+[![license](https://img.shields.io/github/license/jwoglom/rmapi-js)](LICENSE)
+
+> **Fork notice.** This is a fork of
+> [erikbrinkman/rmapi-js](https://github.com/erikbrinkman/rmapi-js), published
+> to npm as [`@jwoglom/rmapi-js`](https://www.npmjs.com/package/@jwoglom/rmapi-js).
+> Upstream remains the original project; this fork exists to add a command line
+> client and a few consumer-facing fixes. What diverges:
+>
+> - a full `rmapi` command line client (see [CLI](#cli)), also installed as
+>   `rmapi-js` since `rmapi` collides with the Go client
+>   [juruen/rmapi](https://github.com/juruen/rmapi).
+> - `listItems(refresh, includeContent)` — content fetching is now optional,
+>   and all fan-out over entries goes through a bounded request pool instead of
+>   one `Promise.all` over the whole account.
+> - **breaking:** `DocumentType.fileType` is now optional, because it comes
+>   from an item's content, which `listItems(refresh, false)` doesn't fetch.
+> - a fix for `crc-32`'s extensionless subpath import (`crc-32/crc32c` →
+>   `crc-32/crc32c.js`), which node's ESM resolver could not resolve.
+>
+> Everything else, including the library api below, is upstream's work. The
+> library examples below are unchanged from upstream and still import
+> `"rmapi-js"`; read those as `"@jwoglom/rmapi-js"` when using this fork.
 
 JavaScript implementation of the reMarkable api. It should also be pretty easy
 to customize to work with
@@ -85,17 +105,100 @@ library, including the low-level `raw` api.
 
 ### install
 
+It's installed under two names, `rmapi` and `rmapi-js`, which are the same
+program. `rmapi` is the convenient one, but it's also the name of the Go client
+[juruen/rmapi](https://github.com/juruen/rmapi), so in an image that might have
+both on `PATH`, call `rmapi-js` to be unambiguous.
+
+**From npm.** The normal route:
+
 ```sh
-npx rmapi --help
-npm install -g rmapi-js && rmapi --help
+npm install -g @jwoglom/rmapi-js
+rmapi --help
+npx --package @jwoglom/rmapi-js rmapi --help   # without installing
 ```
 
-Running from a checkout uses bun, and everything after `--` goes to the cli:
+**From a release tarball.** The reproducible route, and the one to use in a
+`Dockerfile`. A packed tarball ships the already-built `dist/`, so it runs *no*
+lifecycle scripts and needs neither bun nor any devDependency — only node, npm,
+and the four runtime dependencies npm fetches for you:
 
 ```sh
+npm install -g https://github.com/jwoglom/rmapi-js/releases/download/v12.0.0/jwoglom-rmapi-js-12.0.0.tgz
+```
+
+Every release attaches `jwoglom-rmapi-js-<version>.tgz` as an asset, so the url
+is `.../releases/download/v<version>/jwoglom-rmapi-js-<version>.tgz`. The asset
+name contains the version, so there's no version-independent url; pin the
+version, which is what you want in an image anyway.
+
+**From git.** Installs an arbitrary commit, at the cost of a heavier build: the
+image needs `git`, npm installs the devDependencies, and the `prepare` script
+typechecks and compiles the whole tree with `tsc` at install time. It does not
+need bun.
+
+```sh
+npm install -g github:jwoglom/rmapi-js#<sha>
+```
+
+**From a checkout,** for development. This one uses bun, and everything after
+`--` goes to the cli:
+
+```sh
+bun install
 bun run cli -- ls /
 bun run cli -- put --help
 ```
+
+### docker
+
+Supply the device token at runtime through `RMAPI_DEVICE_TOKEN`, never with a
+`RUN rmapi auth register` or an `ENV` line — either one bakes a credential into
+an image layer that anyone who can pull the image can read.
+
+The small image, installing a release tarball. Nothing here needs bun, a git
+checkout, or a passing test suite:
+
+```dockerfile
+FROM node:22-slim
+
+ARG RMAPI_VERSION=12.0.0
+RUN npm install -g --ignore-scripts \
+      "https://github.com/jwoglom/rmapi-js/releases/download/v${RMAPI_VERSION}/jwoglom-rmapi-js-${RMAPI_VERSION}.tgz"
+
+ENTRYPOINT ["rmapi"]
+```
+
+```sh
+docker build -t rmapi .
+docker run --rm -e RMAPI_DEVICE_TOKEN="$RMAPI_DEVICE_TOKEN" rmapi ls /
+```
+
+Building from source instead, with bun confined to the build stage so the
+runtime image is plain node:
+
+```dockerfile
+FROM oven/bun:1 AS build
+WORKDIR /src
+COPY package.json bun.lockb ./
+# --ignore-scripts because `prepare` compiles dist/, and the source isn't
+# copied yet; the explicit `bun run export` below does that instead
+RUN bun install --frozen-lockfile --ignore-scripts
+COPY . .
+RUN bun run export \
+ && bun pm pack --ignore-scripts --filename /rmapi-js.tgz
+
+FROM node:22-slim
+COPY --from=build /rmapi-js.tgz /tmp/rmapi-js.tgz
+RUN npm install -g --ignore-scripts /tmp/rmapi-js.tgz && rm /tmp/rmapi-js.tgz
+
+ENTRYPOINT ["rmapi"]
+```
+
+`bun run export` compiles `dist/` with `tsc` and builds the minified bundle;
+`bun pm pack` then produces exactly the tarball npm would publish, so the
+runtime stage installs the same thing as the route above. To keep the config
+and hash cache across runs, mount a volume and point `RMAPI_CONFIG_DIR` at it.
 
 ### getting started
 

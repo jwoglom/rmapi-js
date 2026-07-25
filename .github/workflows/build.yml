@@ -18,5 +18,8 @@ jobs:
       - run: bun test
       - run: bun export
       - run: bunx publint --strict
-      - run: npm pack --ignore-scripts
-      - run: bunx @arethetypeswrong/cli --profile esm-only rmapi-js-*.tgz
+      # scoped package: the tarball is named jwoglom-rmapi-js-<version>.tgz
+      - name: Pack and check types
+        run: |
+          tarball=$(npm pack --ignore-scripts --silent)
+          bunx @arethetypeswrong/cli --profile esm-only "$tarball"

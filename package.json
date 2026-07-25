@@ -1,14 +1,20 @@
 {
-  "name": "rmapi-js",
-  "version": "11.1.2",
+  "name": "@jwoglom/rmapi-js",
+  "version": "12.0.0",
   "description": "JavaScript implementation of the reMarkable 1.5 api",
   "repository": {
     "type": "git",
-    "url": "git+ssh://git@github.com/erikbrinkman/rmapi-js.git"
+    "url": "git+https://github.com/jwoglom/rmapi-js.git"
   },
-  "homepage": "https://erikbrinkman.github.io/rmapi-js/",
+  "homepage": "https://github.com/jwoglom/rmapi-js",
   "author": "Erik Brinkman <erik.brinkman@gmail.com>",
+  "contributors": [
+    "James Woglom <j.woglom@nightscoutfoundation.org>"
+  ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "keywords": [
     "remarkable"
   ],
@@ -20,7 +26,8 @@
     }
   },
   "bin": {
-    "rmapi": "./dist/cli/main.js"
+    "rmapi": "./dist/cli/main.js",
+    "rmapi-js": "./dist/cli/main.js"
   },
   "unpkg": "./dist/rmapi-js.esm.min.js",
   "engines": {
@@ -36,8 +43,11 @@
     "doc:md": "typedoc --options typedoc.md.json && node scripts/build-docs-md.js",
     "fmt": "biome format --write",
     "lint": "tsc && biome check && typedoc --emit none",
-    "export": "tsc -p tsconfig.build.json && bun build src/index.ts --minify --outfile dist/rmapi-js.esm.min.js",
-    "prepack": "bun lint && bun test --coverage && bun export"
+    "build": "tsc -p tsconfig.build.json",
+    "bundle": "bun build src/index.ts --minify --outfile dist/rmapi-js.esm.min.js",
+    "export": "npm run build && npm run bundle",
+    "prepare": "npm run build",
+    "prepublishOnly": "bun lint && bun test --coverage && npm run bundle"
   },
   "dependencies": {
     "crc-32": "^1.2.2",

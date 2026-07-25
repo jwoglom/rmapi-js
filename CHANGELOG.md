@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This is the first release of the fork
+[jwoglom/rmapi-js](https://github.com/jwoglom/rmapi-js), published as
+`@jwoglom/rmapi-js`.
+
+### Added
+
+- `rmapi`, a full command line client under `src/cli/` that wraps the whole
+  library, including the low-level `raw` api. It's installed as both `rmapi` and
+  `rmapi-js`, since `rmapi` collides with the Go client `juruen/rmapi`.
+- `listItems` takes a second `includeContent` argument, defaulting to true.
+  Passing false skips fetching each item's content, which saves a request per
+  item but leaves `fileType` and `tags` undefined.
+- `mapPool`, an internal bounded-concurrency `Promise.all(items.map(fn))`.
+  `listItems` and cache pruning now fan out through a pool of 16 requests
+  instead of issuing one request per entry all at once, so listing a large
+  account no longer opens thousands of simultaneous connections.
+
+### Changed
+
+- **BREAKING**: `DocumentType.fileType` is now optional. It's read from an
+  item's content, so it's undefined for entries listed without content.
+- **BREAKING**: the package is now named `@jwoglom/rmapi-js`. `repository` and
+  `homepage` point at the fork, and `author` still credits Erik Brinkman.
+- the entry type returned by `listItems` is now discriminated on the metadata
+  `type` rather than on the shape of the content, which is what makes an absent
+  `fileType` unambiguous.
+- building no longer requires bun. `prepare` runs `tsc -p tsconfig.build.json`,
+  which is all that's needed to produce a working `dist/` (including the cli),
+  so the package installs from git or a tarball with only node and npm. bun is
+  still used for the tests, the linter, and the minified `unpkg` bundle.
+- the release gate (lint, tests with coverage, and the bundle) moved from
+  `prepack` to `prepublishOnly`, so installing the package no longer runs the
+  test suite.
+- `docs/connect` urls in the docs now point at
+  `https://my.remarkable.com/device/apps/connect`.
+
+### Fixed
+
+- `crc-32` is imported as `crc-32/crc32c.js` rather than `crc-32/crc32c`. The
+  extensionless subpath has no `exports` entry to map it, so node's ESM resolver
+  failed to resolve it, which broke node consumers of the published package.
+- `tsconfig.build.json` sets `incremental: false`. It inherited
+  `incremental: true`, so a stale `tsconfig.build.tsbuildinfo` could make `tsc`
+  emit nothing at all after `dist/` had been deleted.
+
 ## [11.1.2] - 2026-07-18
 
 ## [11.1.1] - 2026-07-18
@@ -238,7 +283,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial release
 
-[unreleased]: https://github.com/erikbrinkman/rmapi-js/compare/v11.1.2...HEAD
+[unreleased]: https://github.com/jwoglom/rmapi-js/compare/v11.1.2...HEAD
 [11.1.2]: https://github.com/erikbrinkman/rmapi-js/compare/v11.1.1...v11.1.2
 [11.1.1]: https://github.com/erikbrinkman/rmapi-js/compare/v11.1.0...v11.1.1
 [11.1.0]: https://github.com/erikbrinkman/rmapi-js/compare/v11.0.0...v11.1.0

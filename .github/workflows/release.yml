@@ -31,7 +31,16 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
       - run: npm publish --provenance --access public --ignore-scripts
+      # attach the packed tarball so it can be installed by url, which needs no
+      # bun, no devDependencies, and runs no lifecycle scripts
+      - name: Pack the release tarball
+        id: pack
+        run: |
+          tarball=$(npm pack --ignore-scripts --silent)
+          echo "tarball=${tarball}" >> "$GITHUB_OUTPUT"
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.tag }}" --generate-notes --verify-tag
+        run: |
+          gh release create "${{ inputs.tag }}" --generate-notes --verify-tag \
+            "${{ steps.pack.outputs.tarball }}"
