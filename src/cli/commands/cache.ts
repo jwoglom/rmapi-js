@@ -6,19 +6,26 @@
  * grows without bound until it's pruned; these commands expose that
  * maintenance.
  *
+ * `cache load` goes the other way, deliberately reading ahead so that later
+ * commands find what they need already cached.
+ *
  * `cache path` and `cache info` only read {@link ConfigStore | `ConfigStore`},
  * so they work without a device token and without a network.
  */
 import { writeFile } from "node:fs/promises";
 import {
+  boolFlag,
   type Command,
   type CommandArgs,
   type Context,
+  type FlagValue,
   noExtra,
   type Registry,
   stringFlag,
 } from "../args.js";
+import { UsageError } from "../error.js";
 import { columns } from "../format.js";
+import { warmItems } from "../warm.js";
 
 /** the number of entries and characters a cache dump holds */
 interface CacheStats {
@@ -234,8 +241,175 @@ const infoCommand: Command = {
   },
 };
 
+/** how much of the cloud a `cache load` warms */
+export type LoadLevel = "entries-only" | "metadata" | "content";
+
+/** the result of `cache load` */
+interface LoadResult {
+  /** how much was warmed */
+  level: LoadLevel;
+  /** how many items the root entry list names */
+  listed: number;
+  /** how many of those items were warmed */
+  warmed: number;
+  /**
+   * how many calls into the raw api were issued
+   *
+   * Only present when this command drove the requests itself, which is the case
+   * for `--entries-only` and for `--limit`; the library's own listing doesn't
+   * report a count. Calls whose hash was already cached made no request.
+   */
+  requests?: number;
+  /** how many hashes were fetched and cached that weren't cached before */
+  newlyCached: number;
+  /** whether the warmed cache was written to disk */
+  persisted: boolean;
+  /** the cache stats before warming */
+  before: CacheStats;
+  /** the cache stats after warming */
+  after: CacheStats;
+  /** how long the warm took, in milliseconds */
+  elapsedMs: number;
+}
+
+/** the level the flags select, rejecting contradictory ones */
+function loadLevel(values: Readonly<Record<string, FlagValue>>): LoadLevel {
+  const entriesOnly = boolFlag(values, "entries-only");
+  const content = boolFlag(values, "content");
+  if (entriesOnly && content) {
+    throw new UsageError(
+      "--entries-only and --content are mutually exclusive",
+      "cache load",
+    );
+  }
+  return entriesOnly ? "entries-only" : content ? "content" : "metadata";
+}
+
+/** the item cap `--limit` sets, undefined for every item */
+function loadLimit(
+  values: Readonly<Record<string, FlagValue>>,
+  level: LoadLevel,
+): number | undefined {
+  const raw = stringFlag(values, "limit");
+  if (raw === undefined) {
+    return undefined;
+  }
+  const limit = Number(raw);
+  if (!Number.isInteger(limit) || limit < 0) {
+    throw new UsageError(
+      `--limit must be a non-negative integer, but was '${raw}'`,
+      "cache load",
+    );
+  } else if (level === "entries-only") {
+    throw new UsageError(
+      "--limit doesn't apply to --entries-only, which never reads individual items",
+      "cache load",
+    );
+  }
+  return limit;
+}
+
+const loadCommand: Command = {
+  summary: "warm the hash cache so later commands are fast",
+  usage: "",
+  options: {
+    "entries-only": { type: "boolean" },
+    content: { type: "boolean" },
+    limit: { type: "string" },
+  },
+  descriptions: {
+    "entries-only": "only the root hash and root entry list, two requests",
+    content: "also each item's content, one extra request per item",
+    limit: "warm only the first n items",
+  },
+  details:
+    "Everything reMarkable stores is addressed by the hash of its contents, so\nanything read once can be cached forever. This deliberately reads ahead and\npersists the result, so later commands make far fewer requests.\n\nBy default every item's metadata is read, which is about two requests per\nitem; --content adds each item's file type and tags for a third; and\n--entries-only just learns which items exist. --limit stops after the first n\nitems, for a bounded taste of the work. Interrupting with ctrl-c still keeps\nwhatever was warmed. Pass -v to watch the progress.",
+  async run(ctx: Context, { values, positionals }: CommandArgs): Promise<void> {
+    noExtra(positionals, 0, "cache load");
+    const level = loadLevel(values);
+    const limit = loadLimit(values, level);
+
+    const api = await ctx.api();
+    const before = cacheStats(api.dumpCache());
+    const started = Date.now();
+
+    // this is the root hash and the root entry list, two calls, and the count
+    // every level reports
+    const ids = await api.listIds(ctx.refresh);
+    ctx.diagnostic(`the root entry list names ${String(ids.length)} items`);
+    const content = level === "content";
+    let warmed: number;
+    let requests: number | undefined;
+    if (level === "entries-only") {
+      warmed = 0;
+      requests = 2;
+    } else if (limit === undefined) {
+      // the library's listing, which is what later commands go through
+      const items = await api.listItems(false, content);
+      warmed = items.length;
+      requests = undefined;
+    } else {
+      const capped = ids.slice(0, limit);
+      ctx.diagnostic(`warming the first ${String(capped.length)} items`);
+      const result = await warmItems(api, capped, {
+        content,
+        progress: (done, total) => {
+          ctx.diagnostic(`warmed ${String(done)}/${String(total)} items`);
+        },
+      });
+      warmed = result.items;
+      requests = 2 + result.rawCalls;
+    }
+
+    const dump = api.dumpCache();
+    const elapsedMs = Date.now() - started;
+    const after = cacheStats(dump);
+    if (ctx.cache) {
+      await ctx.config.writeCache(dump);
+    }
+
+    const result: LoadResult = {
+      level,
+      listed: ids.length,
+      warmed,
+      ...(requests === undefined ? {} : { requests }),
+      newlyCached: after.cached - before.cached,
+      persisted: ctx.cache,
+      before,
+      after,
+      elapsedMs,
+    };
+    ctx.out.write(result, (val) => {
+      const rows: (readonly string[])[] = [
+        ["level", val.level],
+        ["items listed", String(val.listed)],
+        ["items warmed", String(val.warmed)],
+      ];
+      if (val.requests !== undefined) {
+        rows.push(["raw calls", String(val.requests)]);
+      }
+      rows.push(
+        ["hashes fetched", String(val.newlyCached)],
+        [
+          "entries",
+          `${String(val.before.entries)} -> ${String(val.after.entries)}`,
+        ],
+        [
+          "cached",
+          `${String(val.before.cached)} -> ${String(val.after.cached)}`,
+        ],
+        ["bytes", `${String(val.before.bytes)} -> ${String(val.after.bytes)}`],
+        ["elapsed", `${String(val.elapsedMs)}ms`],
+        ["persisted", val.persisted ? "yes" : "no (--no-cache)"],
+      );
+      return columns(rows);
+    });
+  },
+};
+
 /** the `cache` family of commands */
 export const cacheCommands: Registry = {
+  "cache load": loadCommand,
   "cache dump": dumpCommand,
   "cache prune": pruneCommand,
   "cache clear": clearCommand,

@@ -27,7 +27,7 @@ const registerCommand: Command = {
   usage: "<code>",
   options: {},
   details:
-    "Get an eight letter code from https://my.remarkable.com/device/browser/connect\nand pass it here. The resulting device token never expires and is stored in\nthe config directory with mode 0600.",
+    "Get an eight letter code from https://my.remarkable.com/device/apps/connect\nand pass it here. The resulting device token never expires and is stored in\nthe config directory with mode 0600.",
   async run(ctx: Context, { positionals }: CommandArgs): Promise<void> {
     const [code] = positionals;
     if (code === undefined) {
@@ -91,7 +91,7 @@ const statusCommand: Command = {
     };
     ctx.out.write(status, (val) => {
       if (!val.registered) {
-        return "not registered; run 'rmapi auth register <code>'";
+        return "not registered; get a code from https://my.remarkable.com/device/apps/connect\nand run 'rmapi auth register <code>'";
       }
       const lines = [
         `registered:    yes (${val.source})`,

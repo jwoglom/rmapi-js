@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Entry, RemarkableApi, SimpleEntry } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { AmbiguousTargetError, TargetNotFoundError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { lsCommands } from "./ls.js";
 
 const { ls: lsCommand } = lsCommands;
@@ -252,5 +252,37 @@ describe("ls", () => {
     const { api, refreshes } = fakeApi();
     await ls.run(testContext({ api, refresh: true }), args());
     expect(refreshes).toEqual([true]);
+  });
+});
+
+/** the `includeContent` argument of every `listItems` call a run made */
+async function contents(
+  values: CommandArgs["values"] = {},
+  positionals: readonly string[] = [],
+): Promise<(boolean | undefined)[]> {
+  const { api } = fakeApi();
+  const watched = watchListItems(api);
+  await ls.run(
+    testContext({ api: watched.api, out: captureOutput().out }),
+    args(values, positionals),
+  );
+  return watched.calls.map(({ includeContent }) => includeContent);
+}
+
+describe("ls content", () => {
+  test("a plain listing never fetches content", async () => {
+    expect(await contents()).toEqual([false]);
+    expect(await contents({}, ["books"])).toEqual([false]);
+    expect(await contents({ all: true })).toEqual([false]);
+    expect(await contents({ recursive: true })).toEqual([false]);
+  });
+
+  test("--long fetches content for its file type column", async () => {
+    expect(await contents({ long: true })).toEqual([true]);
+    expect(await contents({ long: true, all: true })).toEqual([true]);
+  });
+
+  test("--ids doesn't list items at all", async () => {
+    expect(await contents({ ids: true })).toEqual([]);
   });
 });

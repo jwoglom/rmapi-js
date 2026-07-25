@@ -1,7 +1,7 @@
 import type { RemarkableApi } from "../index.js";
 import type { Context, Globals } from "./args.js";
 import type { Config, ConfigStore, StorePaths } from "./config.js";
-import { type Output, output } from "./format.js";
+import { type Diagnostic, diagnostics, type Output, output } from "./format.js";
 
 /** an in-memory config store, with the persisted state visible for assertions */
 export interface MemStore extends ConfigStore {
@@ -104,6 +104,78 @@ export function captureOutput({
   };
 }
 
+/** how a command called `listItems` */
+export interface ListItemsCall {
+  /** the `refresh` argument, undefined when it wasn't passed */
+  readonly refresh: boolean | undefined;
+  /** the `includeContent` argument, undefined when it wasn't passed */
+  readonly includeContent: boolean | undefined;
+}
+
+/** an api whose `listItems` calls are recorded */
+export interface WatchedApi {
+  /** the api to hand to commands */
+  readonly api: RemarkableApi;
+  /** every `listItems` call, in order */
+  readonly calls: readonly ListItemsCall[];
+}
+
+/**
+ * wrap an api so its `listItems` arguments can be asserted on
+ *
+ * Content costs an extra request per item, so commands that don't need it must
+ * pass `includeContent` as false; this is how a spec proves that.
+ *
+ * @param api - the api to wrap, whose `listItems` is still what runs
+ */
+export function watchListItems(api: RemarkableApi): WatchedApi {
+  const calls: ListItemsCall[] = [];
+  const watched = new Proxy(api, {
+    get(target, prop, receiver): unknown {
+      if (prop !== "listItems") {
+        return Reflect.get(target, prop, receiver) as unknown;
+      }
+      return (
+        refresh?: boolean,
+        includeContent?: boolean,
+      ): Promise<unknown[]> => {
+        calls.push({ refresh, includeContent });
+        return target.listItems(refresh, includeContent);
+      };
+    },
+  });
+  return { api: watched, calls };
+}
+
+/** a diagnostic that records what it was asked to emit */
+export interface CapturedDiagnostics {
+  /** the diagnostic to hand to commands */
+  readonly diagnostic: Diagnostic;
+  /** every line written, in order, with the `rmapi: ` prefix stripped */
+  readonly messages: readonly string[];
+}
+
+/**
+ * create a diagnostic that captures what it's given
+ *
+ * The real gating is used, so a diagnostic created with `verbose: false`
+ * records nothing, exactly as the cli behaves.
+ *
+ * @param opts - whether `--verbose` was given, false by default
+ */
+export function captureDiagnostics({
+  verbose = false,
+}: {
+  verbose?: boolean;
+} = {}): CapturedDiagnostics {
+  const messages: string[] = [];
+  const diagnostic = diagnostics(
+    verbose,
+    (text) => void messages.push(text.replace(/^rmapi: /, "").trimEnd()),
+  );
+  return { diagnostic, messages };
+}
+
 /** the global settings a test context starts from */
 export const defaultGlobals: Globals = {
   json: false,
@@ -129,6 +201,15 @@ export interface TestContextOptions extends Partial<Globals> {
   config?: ConfigStore;
   /** the output commands write to */
   out?: Output;
+  /**
+   * where commands write progress diagnostics
+   *
+   * Defaults to one gated on the `verbose` global, so it drops everything
+   * unless the context was made verbose. Pass a
+   * {@link captureDiagnostics | `captureDiagnostics`} diagnostic to assert on
+   * them.
+   */
+  diagnostic?: Diagnostic;
   /** the environment commands see */
   env?: Readonly<Record<string, string | undefined>>;
   /** the text commands read when they accept `-` for stdin */
@@ -144,14 +225,17 @@ export function testContext({
   api,
   config = memStore(),
   out = captureOutput().out,
+  diagnostic,
   env = {},
   stdin = "",
   ...globals
 }: TestContextOptions = {}): Context {
+  const merged: Globals = { ...defaultGlobals, ...globals };
   return {
-    ...defaultGlobals,
-    ...globals,
+    ...merged,
     out,
+    diagnostic:
+      diagnostic ?? captureDiagnostics({ verbose: merged.verbose }).diagnostic,
     config,
     env,
     stdin(): Promise<string> {

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   auth,
+  type CollectionContent,
   type Content,
   type DocumentContent,
   type Entry,
@@ -106,23 +107,32 @@ describe("remarkable", () => {
     });
   });
 
-  test("#listItems()", async () => {
+  describe("#listItems()", () => {
     const docId = "document";
+    const collectionId = "collection";
     const templateId = "template";
     const entryHash = repHash("1");
     const metaHash = repHash("2");
     const contentHash = repHash("3");
-    const templateEntryHash = repHash("4");
-    const templateMetaHash = repHash("5");
-    const templateContentHash = repHash("6");
+    const collectionEntryHash = repHash("4");
+    const collectionMetaHash = repHash("5");
+    const collectionContentHash = repHash("6");
+    const templateEntryHash = repHash("7");
+    const templateMetaHash = repHash("8");
+    const templateContentHash = repHash("9");
     const rootEntries = `3
 ${entryHash}:80000000:${docId}:4:3
+${collectionEntryHash}:80000000:${collectionId}:2:3
 ${templateEntryHash}:80000000:${templateId}:4:3
 `;
     const docEntries = `3
 ${contentHash}:0:${docId}.content:0:1
 ${metaHash}:0:${docId}.metadata:0:1
 fake_hash:0:${docId}.epub:0:1
+`;
+    const collectionEntries = `3
+${collectionContentHash}:0:${collectionId}.content:0:1
+${collectionMetaHash}:0:${collectionId}.metadata:0:1
 `;
     const templateEntries = `3
 ${templateContentHash}:0:${templateId}.content:0:1
@@ -141,8 +151,12 @@ fake_template_hash:0:${docId}.template:0:1
       orientation: "portrait",
       pageCount: 0,
       sizeInBytes: "",
+      tags: [{ name: "doc tag", timestamp: 3 }],
       textAlignment: "justify",
       textScale: 0,
+    };
+    const collectionContent: CollectionContent = {
+      tags: [{ name: "collection tag", timestamp: 4 }],
     };
     const metadata: Metadata = {
       lastModified: "",
@@ -150,6 +164,13 @@ fake_template_hash:0:${docId}.template:0:1
       pinned: false,
       type: "DocumentType",
       visibleName: "doc name",
+    };
+    const collectionMetadata: Metadata = {
+      lastModified: "5",
+      parent: "",
+      pinned: true,
+      type: "CollectionType",
+      visibleName: "folder name",
     };
     const templateMetadata: Metadata = {
       createdTime: "2024-01-02T03:04:05Z",
@@ -181,35 +202,15 @@ fake_template_hash:0:${docId}.template:0:1
         },
       ],
     };
-    const expected: Entry = {
-      id: docId,
-      hash: entryHash,
-      pinned: metadata.pinned,
-      type: metadata.type,
-      lastOpened: "",
-      lastModified: metadata.lastModified,
-      fileType: content.fileType,
-      visibleName: metadata.visibleName,
-      parent: metadata.parent,
-      tags: content.tags,
+    const expectedCollection: Entry = {
+      id: collectionId,
+      hash: collectionEntryHash,
+      visibleName: collectionMetadata.visibleName,
+      lastModified: collectionMetadata.lastModified,
+      pinned: collectionMetadata.pinned,
+      parent: collectionMetadata.parent,
+      type: "CollectionType",
     };
-
-    mockFetch(
-      emptyResponse(),
-      jsonResponse({
-        hash: repHash("0"),
-        generation: 0,
-        schemaVersion: 3,
-      }),
-      textResponse(rootEntries),
-      textResponse(docEntries),
-      textResponse(templateEntries),
-      jsonResponse(metadata),
-      jsonResponse(content),
-      jsonResponse(templateMetadata),
-      jsonResponse(templateContent),
-    );
-
     const expectedTemplate: Entry = {
       id: templateId,
       hash: templateEntryHash,
@@ -223,10 +224,112 @@ fake_template_hash:0:${docId}.template:0:1
       type: "TemplateType",
     };
 
-    const api = await remarkable("");
-    const [loaded, template] = await api.listItems();
-    expect(loaded).toEqual(expected);
-    expect(template).toEqual(expectedTemplate);
+    /** the root hash response every listing starts with */
+    const rootHashResponse = () =>
+      jsonResponse({
+        hash: repHash("0"),
+        generation: 0,
+        schemaVersion: 3,
+      });
+
+    /** the responses for a listing that reads metadata and content */
+    const contentResponses = (): Response[] => [
+      emptyResponse(),
+      rootHashResponse(),
+      textResponse(rootEntries),
+      textResponse(docEntries),
+      textResponse(collectionEntries),
+      textResponse(templateEntries),
+      jsonResponse(metadata),
+      jsonResponse(content),
+      jsonResponse(collectionMetadata),
+      jsonResponse(collectionContent),
+      jsonResponse(templateMetadata),
+      jsonResponse(templateContent),
+    ];
+
+    /** the responses for a listing that only reads metadata */
+    const metadataOnlyResponses = (): Response[] => [
+      emptyResponse(),
+      rootHashResponse(),
+      textResponse(rootEntries),
+      textResponse(docEntries),
+      textResponse(collectionEntries),
+      textResponse(templateEntries),
+      jsonResponse(metadata),
+      jsonResponse(collectionMetadata),
+      jsonResponse(templateMetadata),
+    ];
+
+    test("includes content by default", async () => {
+      const fetch = mockFetch(...contentResponses());
+
+      const api = await remarkable("");
+      const [doc, collection, template] = await api.listItems();
+
+      // auth, root hash, root entries, then three requests for each of the
+      // three items
+      expect(fetch.mock.calls).toHaveLength(3 + 3 * 3);
+      expect(doc).toEqual({
+        id: docId,
+        hash: entryHash,
+        pinned: metadata.pinned,
+        type: "DocumentType",
+        lastOpened: "",
+        lastModified: metadata.lastModified,
+        fileType: content.fileType,
+        visibleName: metadata.visibleName,
+        parent: metadata.parent,
+        tags: content.tags,
+      });
+      expect(collection).toEqual({
+        ...expectedCollection,
+        tags: collectionContent.tags,
+      });
+      // templates never have a fileType, and this one has no tags
+      expect(template).toEqual(expectedTemplate);
+    });
+
+    test("includeContent false skips content", async () => {
+      // NOTE no content responses; requesting one would throw in the mock
+      const fetch = mockFetch(...metadataOnlyResponses());
+
+      const api = await remarkable("");
+      const [doc, collection, template] = await api.listItems(false, false);
+
+      // exactly one fewer request per item than the default mode
+      expect(fetch.mock.calls).toHaveLength(3 + 2 * 3);
+      expect(doc).toEqual({
+        id: docId,
+        hash: entryHash,
+        pinned: metadata.pinned,
+        type: "DocumentType",
+        lastOpened: "",
+        lastModified: metadata.lastModified,
+        visibleName: metadata.visibleName,
+        parent: metadata.parent,
+      });
+      // fileType and tags live in content, which wasn't fetched
+      expect(doc?.type).toBe("DocumentType");
+      if (doc?.type !== "DocumentType") {
+        throw new Error("expected a document");
+      }
+      expect(doc.fileType).toBeUndefined();
+      expect(doc.tags).toBeUndefined();
+      expect(collection).toEqual(expectedCollection);
+      expect(collection?.tags).toBeUndefined();
+      expect(template).toEqual(expectedTemplate);
+    });
+
+    test("refresh is still the first positional argument", async () => {
+      const fetch = mockFetch(...contentResponses());
+
+      const api = await remarkable("");
+      const items = await api.listItems(true);
+
+      expect(items).toHaveLength(3);
+      expect(fetch.mock.calls).toHaveLength(3 + 3 * 3);
+    });
   });
 
   test("#getMetadata() accepts lastOpenedPage -1", async () => {

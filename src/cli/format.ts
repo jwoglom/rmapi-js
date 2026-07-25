@@ -121,6 +121,34 @@ export function output({ json, color }: OutputOptions, sink: Sink): Output {
 }
 
 /**
+ * emits progress diagnostics, a no-op unless verbose
+ *
+ * Diagnostics are prefixed with the binary name and always end in a newline, so
+ * the sink is a plain writer. The sink must be stderr, never stdout, so that
+ * piping `--json` output stays clean.
+ */
+export type Diagnostic = (message: string) => void;
+
+/**
+ * create the {@link Diagnostic | `Diagnostic`} a run should use
+ *
+ * Gating lives here rather than at every call site so commands can emit
+ * progress unconditionally.
+ *
+ * @param verbose - whether `--verbose` was given; nothing is written when false
+ * @param sink - where diagnostics are written, stderr in the real cli
+ * @returns a function that writes one prefixed line per message
+ */
+export function diagnostics(verbose: boolean, sink: Sink): Diagnostic {
+  if (!verbose) {
+    return () => {};
+  }
+  return (message: string): void => {
+    sink(`rmapi: ${message}\n`);
+  };
+}
+
+/**
  * render rows as space aligned columns
  *
  * Alignment ignores ansi escapes so styled cells still line up.

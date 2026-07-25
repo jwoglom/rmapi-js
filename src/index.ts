@@ -12,7 +12,7 @@
  * ```ts
  * import { register, remarkable } from "rmapi-js";
  *
- * const code = "..."  // eight letter code from https://my.remarkable.com/device/browser/connect
+ * const code = "..."  // eight letter code from https://my.remarkable.com/device/apps/connect
  * const token = await register(code)
  * // persist token
  * const api = await remarkable(token);
@@ -62,6 +62,7 @@ import {
   type Content,
   type DocumentContent,
   type Entries,
+  type FileType,
   type Metadata,
   type Orientation,
   type RawEntry,
@@ -75,6 +76,7 @@ import {
   type TextAlignment,
   type ZoomMode,
 } from "./raw.js";
+import { mapPool } from "./utils.js";
 
 export {
   type DeviceModel,
@@ -116,6 +118,16 @@ const AUTH_HOST = "https://webapp-prod.cloud.remarkable.engineering";
 const RAW_HOST = "https://eu.tectonic.remarkable.com";
 const UPLOAD_HOST = "https://internal.cloud.remarkable.com";
 
+/**
+ * the maximum number of simultaneous requests when walking many entries
+ *
+ * Operations like listing every item fan out over the whole account, which for
+ * a large account is thousands of requests. Issuing them all at once is both
+ * slower than a bounded pool and likely to be throttled server side, so
+ * everything that maps over entries goes through a pool of this size.
+ */
+const REQUEST_POOL_LIMIT = 16;
+
 // The section has all the types that are stored in the remarkable cloud.
 
 const idReg =
@@ -140,27 +152,61 @@ export interface EntryCommon {
    * and "trash" for the trash
    */
   parent?: string;
-  /** any tags the entry might have */
+  /**
+   * any tags the entry might have
+   *
+   * Tags are stored in an item's content, so this is only populated when the
+   * entry was listed with content, which is the default for
+   * {@link RemarkableApi.listItems | `listItems`}, but not when it's called
+   * with `includeContent` set to false.
+   */
   tags?: Tag[] | string[];
 }
 
-/** a folder, referred to in the api as a collection */
+/**
+ * a folder, referred to in the api as a collection
+ *
+ * @remarks
+ * {@link EntryCommon.tags | `tags`} is only set when the entry was listed with
+ * content, see {@link RemarkableApi.listItems | `listItems`}.
+ */
 export interface CollectionEntry extends EntryCommon {
   /** the key for this as a collection */
   type: "CollectionType";
 }
 
-/** a file, referred to in the api as a document */
+/**
+ * a file, referred to in the api as a document
+ *
+ * @remarks
+ * {@link DocumentType.fileType | `fileType`} and
+ * {@link EntryCommon.tags | `tags`} are only set when the entry was listed
+ * with content, see {@link RemarkableApi.listItems | `listItems`}.
+ */
 export interface DocumentType extends EntryCommon {
   /** the key to identify this as a document */
   type: "DocumentType";
-  /** the type of the file */
-  fileType: "epub" | "pdf" | "notebook";
+  /**
+   * the type of the file
+   *
+   * This lives in the item's content, so it's undefined unless the entry was
+   * fetched with content, which is the default for
+   * {@link RemarkableApi.listItems | `listItems`}, but not when it's called
+   * with `includeContent` set to false.
+   */
+  fileType?: FileType;
   /** the timestamp of the last time this entry was opened */
   lastOpened: string;
 }
 
-/** a template, such as from methods.remarkable.com */
+/**
+ * a template, such as from methods.remarkable.com
+ *
+ * @remarks
+ * templates never have a `fileType`, and their
+ * {@link EntryCommon.tags | `tags`} are only set when the entry was listed
+ * with content, see {@link RemarkableApi.listItems | `listItems`}.
+ */
 export interface TemplateType extends EntryCommon {
   /** the key to identify this as a template */
   type: "TemplateType";
@@ -172,7 +218,18 @@ export interface TemplateType extends EntryCommon {
   new?: boolean;
 }
 
-/** a remarkable entry for cloud items */
+/**
+ * a remarkable entry for cloud items
+ *
+ * @remarks
+ * Everything on an entry comes from the item's metadata, except for
+ * {@link DocumentType.fileType | `fileType`} and
+ * {@link EntryCommon.tags | `tags`}, which come from the item's content. Those
+ * two are only populated when the entry was listed with content, which is the
+ * default for {@link RemarkableApi.listItems | `listItems`}, but not when it's
+ * called with `includeContent` set to false, in which case they're always
+ * undefined.
+ */
 export type Entry = CollectionEntry | DocumentType | TemplateType;
 
 /** the new hash of a modified entry */
@@ -249,11 +306,11 @@ export interface RegisterOptions {
 /**
  * register a device and get the token needed to access the api
  *
- * Have users go to `https://my.remarkable.com/device/browser/connect` and pass
+ * Have users go to `https://my.remarkable.com/device/apps/connect` and pass
  * the resulting code into this function to get a device token. Persist that
  * token to use the api.
  *
- * @param code - the eight letter code a user got from `https://my.remarkable.com/device/browser/connect`.
+ * @param code - the eight letter code a user got from `https://my.remarkable.com/device/apps/connect`.
  * @returns the device token necessary for creating an api instace. These never expire so persist as long as necessary.
  */
 export async function register(
@@ -389,19 +446,39 @@ export interface RemarkableApi {
    * will have their parent set to something other than "" or "trash", but
    * everything will be returned by this function.
    *
+   * By default this reads each item's metadata and its content, which is three
+   * requests per item. Passing `includeContent` as false skips the content,
+   * which is only two requests per item, but leaves
+   * {@link DocumentType.fileType | `fileType`} and
+   * {@link EntryCommon.tags | `tags`} undefined, since those are stored in the
+   * content.
+   *
    * @example
    * ```ts
    * await api.listItems();
    * ```
    *
+   * @example
+   * when you don't need file types or tags, and want the listing to be faster
+   * ```ts
+   * await api.listItems(false, false);
+   * ```
+   *
    * @remarks
    * This is now backed by the low level api, and you may notice some
-   * performance degradation if not taking advantage of the cache.
+   * performance degradation if not taking advantage of the cache. Requests are
+   * issued from a bounded pool, so listing a large account won't open an
+   * unbounded number of simultaneous connections.
    *
    * @param refresh - if true, refresh the root hash before listing
+   * @param includeContent - if true (the default), also fetch each item's
+   *   content so that {@link DocumentType.fileType | `fileType`} and
+   *   {@link EntryCommon.tags | `tags`} are populated. Set this to false to
+   *   save a request per item, in which case those two fields are always
+   *   undefined.
    * @returns a list of all items with some metadata
    */
-  listItems(refresh?: boolean): Promise<Entry[]>;
+  listItems(refresh?: boolean, includeContent?: boolean): Promise<Entry[]>;
 
   /**
    * similar to {@link listItems | `listItems`} but backed by the low level api
@@ -850,10 +927,15 @@ class Remarkable implements RemarkableApi {
     }
   }
 
-  async #convertEntry({ hash, id }: SimpleEntry): Promise<Entry> {
+  async #convertEntry(
+    { hash, id }: SimpleEntry,
+    includeContent: boolean,
+  ): Promise<Entry> {
     const { entries } = await this.raw.getEntries(`${id}.docSchema`, hash);
     const metaEnt = entries.find((ent) => ent.id.endsWith(".metadata"));
-    const contentEnt = entries.find((ent) => ent.id.endsWith(".content"));
+    const contentEnt = includeContent
+      ? entries.find((ent) => ent.id.endsWith(".content"))
+      : undefined;
     if (metaEnt === undefined) {
       throw new Error(`couldn't find metadata for hash ${hash}`);
     }
@@ -868,16 +950,22 @@ class Remarkable implements RemarkableApi {
         createdTime,
         new: isNew,
         source,
+        type,
       },
       content,
     ] = await Promise.all([
       this.raw.getMetadata(metaEnt.id, metaEnt.hash),
-      // collections don't always have content, since content only lists tags
+      // collections don't always have content, since content only lists tags,
+      // and we skip content entirely unless it was requested
       contentEnt === undefined
         ? Promise.resolve({ fileType: undefined, tags: undefined })
         : this.raw.getContent(contentEnt.id, contentEnt.hash),
     ]);
-    if ("templateVersion" in content) {
+    // templates have no fileType, and content only has tags for the others, so
+    // the metadata type is the authoritative discriminant
+    const fileType = "fileType" in content ? content.fileType : undefined;
+    const tags = "tags" in content ? content.tags : undefined;
+    if (type === "TemplateType") {
       return {
         id,
         hash,
@@ -890,7 +978,7 @@ class Remarkable implements RemarkableApi {
         createdTime,
         type: "TemplateType",
       };
-    } else if (content.fileType === undefined) {
+    } else if (type === "CollectionType") {
       return {
         id,
         hash,
@@ -898,7 +986,7 @@ class Remarkable implements RemarkableApi {
         lastModified,
         pinned,
         parent,
-        tags: content.tags,
+        tags,
         type: "CollectionType",
       };
     } else {
@@ -909,18 +997,23 @@ class Remarkable implements RemarkableApi {
         lastModified,
         pinned,
         parent,
-        tags: content.tags,
+        tags,
         lastOpened: lastOpened ?? "",
-        fileType: content.fileType,
+        fileType,
         type: "DocumentType",
       };
     }
   }
 
   /** list all items */
-  async listItems(refresh: boolean = false): Promise<Entry[]> {
+  async listItems(
+    refresh: boolean = false,
+    includeContent: boolean = true,
+  ): Promise<Entry[]> {
     const ids = await this.listIds(refresh);
-    return await Promise.all(ids.map((id) => this.#convertEntry(id)));
+    return await mapPool(ids, REQUEST_POOL_LIMIT, (id) =>
+      this.#convertEntry(id, includeContent),
+    );
   }
 
   async listIds(refresh: boolean = false): Promise<SimpleEntry[]> {
@@ -1487,17 +1580,22 @@ class Remarkable implements RemarkableApi {
     // for other calls to increase the cache with misc values.
     const base = await this.raw.getEntries("root.docSchema", rootHash);
     let entries = [base.entries];
-    let nextEntries: Promise<Entries>[] = [];
+    let nextEntries: SimpleEntry[] = [];
     while (entries.length) {
       for (const entryList of entries) {
         for (const { hash, subfiles, id } of entryList) {
           toDelete.delete(hash);
           if (subfiles > 0) {
-            nextEntries.push(this.raw.getEntries(`${id}.docSchema`, hash));
+            nextEntries.push({ id, hash });
           }
         }
       }
-      const resolved = await Promise.all(nextEntries);
+      // bounded so a large account doesn't fan out over every entry at once
+      const resolved: Entries[] = await mapPool(
+        nextEntries,
+        REQUEST_POOL_LIMIT,
+        ({ id, hash }) => this.raw.getEntries(`${id}.docSchema`, hash),
+      );
       entries = resolved.map((ent) => ent.entries);
       nextEntries = [];
     }

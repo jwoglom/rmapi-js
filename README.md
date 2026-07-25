@@ -27,7 +27,7 @@ collections.
 ```ts
 import { auth, register, remarkable, session } from "rmapi-js";
 
-const code = "..."; // eight letter code from https://my.remarkable.com/device/desktop/connect
+const code = "..."; // eight letter code from https://my.remarkable.com/device/apps/connect
 const token = await register(code);
 // persist token so you don't have to register again
 const api = await remarkable(token);
@@ -100,7 +100,7 @@ bun run cli -- put --help
 ### getting started
 
 Get an eight letter code from
-<https://my.remarkable.com/device/browser/connect> and register with it:
+<https://my.remarkable.com/device/apps/connect> and register with it:
 
 ```sh
 rmapi auth register ABCDEFGH

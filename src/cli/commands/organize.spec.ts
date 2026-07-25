@@ -8,7 +8,7 @@ import {
 } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { AmbiguousTargetError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { organizeCommands } from "./organize.js";
 
 function command(name: string): Command {
@@ -427,5 +427,27 @@ describe("star", () => {
     const { api, calls } = fakeApi({ failures: 1 });
     await command("star").run(testContext({ api }), args({}, ["one"]));
     expect(calls.map((call) => call.refresh)).toEqual([false, true]);
+  });
+});
+
+describe("organize content", () => {
+  test("no organize command fetches content", async () => {
+    for (const [name, positionals] of [
+      ["mv", ["one", "books"]],
+      ["rm", ["one"]],
+      ["rename", ["one", "uno"]],
+      ["star", ["one"]],
+      ["unstar", ["one"]],
+    ] as const) {
+      const { api } = fakeApi();
+      const watched = watchListItems(api);
+      await command(name).run(
+        testContext({ api: watched.api, out: captureOutput().out }),
+        args({}, positionals),
+      );
+      expect(watched.calls.map(({ includeContent }) => includeContent)).toEqual(
+        [false],
+      );
+    }
   });
 });

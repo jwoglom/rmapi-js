@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Entry, RemarkableApi } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { TargetNotFoundError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { findCommands } from "./find.js";
 
 const { find: findCommand } = findCommands;
@@ -239,5 +239,32 @@ describe("find", () => {
         path: "/books/chapter 1",
       },
     ]);
+  });
+});
+
+/** the `includeContent` argument of every `listItems` call a run made */
+async function contents(
+  values: CommandArgs["values"] = {},
+): Promise<(boolean | undefined)[]> {
+  const watched = watchListItems(fakeApi());
+  await find.run(
+    testContext({ api: watched.api, out: captureOutput().out }),
+    args(values),
+  );
+  return watched.calls.map(({ includeContent }) => includeContent);
+}
+
+describe("find content", () => {
+  test("name, type, and pinned filters stay on the fast path", async () => {
+    expect(await contents()).toEqual([false]);
+    expect(await contents({ name: "chapter" })).toEqual([false]);
+    expect(await contents({ type: "document" })).toEqual([false]);
+    expect(await contents({ pinned: true })).toEqual([false]);
+  });
+
+  test("--file-type, --tag, and --long need content", async () => {
+    expect(await contents({ "file-type": "pdf" })).toEqual([true]);
+    expect(await contents({ tag: "shelf" })).toEqual([true]);
+    expect(await contents({ long: true })).toEqual([true]);
   });
 });

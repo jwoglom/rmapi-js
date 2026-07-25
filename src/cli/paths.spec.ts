@@ -66,6 +66,12 @@ describe("escapeSegment()", () => {
     expect(escapeSegment("a\\b")).toBe("a\\\\b");
     expect(escapeSegment("plain")).toBe("plain");
   });
+
+  test("escapes a name that is exactly a dot", () => {
+    expect(escapeSegment(".")).toBe("\\.");
+    expect(escapeSegment("..")).toBe("..");
+    expect(escapeSegment(".hidden")).toBe(".hidden");
+  });
 });
 
 describe("parsePath()", () => {
@@ -83,6 +89,18 @@ describe("parsePath()", () => {
 
   test("round trips escaped names", () => {
     expect(parsePath(`/${escapeSegment("a/b")}`)).toEqual(["a/b"]);
+  });
+
+  test("drops unescaped dot segments", () => {
+    expect(parsePath(".")).toEqual([]);
+    expect(parsePath("./")).toEqual([]);
+    expect(parsePath("/a/./b")).toEqual(["a", "b"]);
+    expect(parsePath("..")).toEqual([".."]);
+  });
+
+  test("keeps an escaped dot as a name", () => {
+    expect(parsePath("\\.")).toEqual(["."]);
+    expect(parsePath(`/${escapeSegment(".")}`)).toEqual(["."]);
   });
 });
 
@@ -257,6 +275,12 @@ describe("resolveTarget()", () => {
     expect(resolveTarget(entries, "/trash")).toBe(trashEntry);
     expect(resolveTarget(entries, "trash")).toBe(trashEntry);
     expect(resolveTarget([], "/")).toBe(rootEntry);
+  });
+
+  test("a dot means the root, since there is no working directory", () => {
+    expect(resolveTarget(entries, ".")).toBe(rootEntry);
+    expect(resolveTarget(entries, "./")).toBe(rootEntry);
+    expect(resolveTarget(entries, "./Books")).toBe(books);
   });
 
   test("nested path", () => {

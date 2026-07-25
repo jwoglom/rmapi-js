@@ -70,7 +70,7 @@ export function resolveDeviceToken(
   const token = RMAPI_DEVICE_TOKEN ?? config.deviceToken;
   if (!token) {
     throw new AuthError(
-      "no device token found; run 'rmapi auth register <code>' with a code from https://my.remarkable.com/device/browser/connect, or set RMAPI_DEVICE_TOKEN",
+      "no device token found; run 'rmapi auth register <code>' with a code from https://my.remarkable.com/device/apps/connect, or set RMAPI_DEVICE_TOKEN",
     );
   }
   return token;

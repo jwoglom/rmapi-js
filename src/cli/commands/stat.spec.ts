@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Content, Entry, Metadata, RemarkableApi } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { TargetNotFoundError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { statCommands } from "./stat.js";
 
 const {
@@ -209,5 +209,33 @@ describe("stat", () => {
     expect(stat.run(testContext({ api }), args(["/nope"]))).rejects.toThrow(
       TargetNotFoundError,
     );
+  });
+});
+
+/** the `includeContent` argument of every `listItems` call a run made */
+async function contents(
+  cmd: Command,
+  positionals: readonly string[] = ["/books/notes"],
+): Promise<(boolean | undefined)[]> {
+  const { api } = fakeApi();
+  const watched = watchListItems(api);
+  await cmd.run(
+    testContext({ api: watched.api, out: captureOutput().out }),
+    args(positionals),
+  );
+  return watched.calls.map(({ includeContent }) => includeContent);
+}
+
+describe("stat content", () => {
+  test("meta resolves its target without any content", async () => {
+    expect(await contents(meta)).toEqual([false]);
+  });
+
+  test("content fetches only its own target's content", async () => {
+    expect(await contents(content)).toEqual([false]);
+  });
+
+  test("stat lists content, for the entry's tags", async () => {
+    expect(await contents(stat)).toEqual([true]);
   });
 });

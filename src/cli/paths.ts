@@ -94,15 +94,18 @@ const hashReg = /^[0-9a-f]{64}$/;
  * escape a `visibleName` for use as a single path segment
  *
  * reMarkable names may contain `/`, which would otherwise look like a path
- * separator, so `\` and `/` are both backslash escaped. This is the inverse of
- * the unescaping done by {@link parsePath | `parsePath`}, so display paths
- * round trip back into targets.
+ * separator, so `\` and `/` are both backslash escaped. A name that is exactly
+ * `.` is escaped too, since a bare `.` segment means the current directory.
+ * This is the inverse of the unescaping done by
+ * {@link parsePath | `parsePath`}, so display paths round trip back into
+ * targets.
  *
  * @param name - the raw `visibleName`
  * @returns the escaped segment
  */
 export function escapeSegment(name: string): string {
-  return name.replace(/[\\/]/g, (char) => `\\${char}`);
+  const escaped = name.replace(/[\\/]/g, (char) => `\\${char}`);
+  return escaped === "." ? "\\." : escaped;
 }
 
 /**
@@ -113,6 +116,11 @@ export function escapeSegment(name: string): string {
  * escapes the character that follows it, so `/a\/b` is the single segment
  * `a/b`, and a trailing lone `\` is dropped.
  *
+ * A `.` segment is dropped, since there is no working directory in the cloud,
+ * so `.` and `./` also mean the root. An item genuinely named `.` has to be
+ * escaped as `\.`, which is what {@link escapeSegment | `escapeSegment`}
+ * produces.
+ *
  * @param path - the path to split
  * @returns the unescaped segments, in order
  */
@@ -120,20 +128,29 @@ export function parsePath(path: string): string[] {
   const segments: string[] = [];
   let current = "";
   let escaped = false;
+  let literal = false;
+  const push = (): void => {
+    // an unescaped "." is the current directory, e.g. the root, not a name
+    if (current && !(current === "." && !literal)) {
+      segments.push(current);
+    }
+    current = "";
+    literal = false;
+  };
   for (const char of path) {
     if (escaped) {
       current += char;
       escaped = false;
     } else if (char === "\\") {
       escaped = true;
+      literal = true;
     } else if (char === "/") {
-      if (current) segments.push(current);
-      current = "";
+      push();
     } else {
       current += char;
     }
   }
-  if (current) segments.push(current);
+  push();
   return segments;
 }
 

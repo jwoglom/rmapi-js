@@ -114,7 +114,10 @@ const findCommand: Command = {
     const long = boolFlag(values, "long");
     const [path] = positionals;
 
-    const items = await allEntries(ctx);
+    // file types and tags live in an item's content, and so does the long
+    // listing's file type column; the other filters are metadata only
+    const needsContent = fileType !== undefined || tag !== undefined || long;
+    const items = await allEntries(ctx, { content: needsContent });
     const paths = entryPaths(items);
     const base =
       path === undefined

@@ -11,7 +11,7 @@ import {
 } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { putCommands } from "./put.js";
 
 const { put: putCommand } = putCommands;
@@ -373,5 +373,19 @@ describe("put", () => {
     const { api, calls } = fakeApi();
     await put.run(testContext({ api, refresh: true }), args({}, [pdf]));
     expect(calls[0]?.opts?.refresh).toBe(true);
+  });
+});
+
+describe("put content", () => {
+  test("resolving a destination never fetches content", async () => {
+    const { api } = fakeApi();
+    const watched = watchListItems(api);
+    await put.run(
+      testContext({ api: watched.api, out: captureOutput().out }),
+      args({}, [pdf, "books"]),
+    );
+    expect(watched.calls.map(({ includeContent }) => includeContent)).toEqual([
+      false,
+    ]);
   });
 });

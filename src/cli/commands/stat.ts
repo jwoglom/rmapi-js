@@ -36,18 +36,21 @@ interface Located {
  * @param ctx - the command context
  * @param positionals - the command's positionals, the first of which is the target
  * @param command - the command name, for usage errors
+ * @param opts - whether the listing has to include each item's content, which
+ *     only matters for the fields the command renders off the resolved entry
  */
 async function locate(
   ctx: Context,
   positionals: readonly string[],
   command: string,
+  { content = false }: { content?: boolean } = {},
 ): Promise<Located> {
   const [raw] = positionals;
   if (raw === undefined) {
     throw new UsageError("a target is required", command);
   }
   noExtra(positionals, 1, command);
-  const items = await allEntries(ctx);
+  const items = await allEntries(ctx, { content });
   const entry = resolveTarget(items, raw, { first: ctx.first });
   if (entry.id === rootEntry.id || entry.id === trashEntry.id) {
     throw new UsageError(
@@ -79,6 +82,8 @@ const metaCommand: Command = {
   usage: "<target>",
   options: {},
   async run(ctx: Context, { positionals }: CommandArgs): Promise<void> {
+    // the metadata is fetched for the resolved item directly, so the listing
+    // that resolves the target doesn't need anyone's content
     const { entry } = await locate(ctx, positionals, "meta");
     const api = await ctx.api();
     const metadata = await api.getMetadata(entry.id, entry.hash);
@@ -93,6 +98,8 @@ const contentCommand: Command = {
   details:
     "Content holds the file type, tags, and reader settings. It is deeply nested,\nso it is always rendered as json.",
   async run(ctx: Context, { positionals }: CommandArgs): Promise<void> {
+    // likewise, this content is fetched for the resolved item directly, rather
+    // than for every item in the listing
     const { entry } = await locate(ctx, positionals, "content");
     const api = await ctx.api();
     const content = await api.getContent(entry.id, entry.hash);
@@ -117,7 +124,10 @@ const statCommand: Command = {
   details:
     "Fetches the metadata and the content together. Under --json the full\n{ entry, metadata, content } is emitted rather than the summary.",
   async run(ctx: Context, { positionals }: CommandArgs): Promise<void> {
-    const { entry, path } = await locate(ctx, positionals, "stat");
+    // the summary lists the entry's tags, which come from its content
+    const { entry, path } = await locate(ctx, positionals, "stat", {
+      content: true,
+    });
     const api = await ctx.api();
     const [metadata, content] = await Promise.all([
       api.getMetadata(entry.id, entry.hash),

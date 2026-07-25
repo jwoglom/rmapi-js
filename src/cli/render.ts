@@ -84,7 +84,7 @@ export function longList(listings: readonly Listing[], out: Output): string {
   return columns(
     listings.map(({ entry, name }) => [
       marker(entry),
-      entry.type === "DocumentType" ? entry.fileType : "",
+      entry.type === "DocumentType" ? (entry.fileType ?? "") : "",
       entry.pinned ? "pinned" : "",
       timestamp(entry.lastModified),
       out.style.dim(entry.id),

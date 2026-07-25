@@ -6,7 +6,7 @@ import { join } from "node:path";
 import type { Entry, RemarkableApi } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { TargetNotFoundError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { getCommands } from "./get.js";
 
 const { get: getCommand } = getCommands;
@@ -260,5 +260,32 @@ describe("get", () => {
     expect(calls).toEqual([["getPdf", "pdf-id", pdfHash]]);
     expect(written).toEqual([[1, bytes("pdf!")]]);
     expect(out.json()).toEqual({ path: "-", bytes: 4 });
+  });
+});
+
+/** the `includeContent` argument of every `listItems` call a run made */
+async function contents(
+  positionals: readonly string[],
+  values: CommandArgs["values"] = {},
+): Promise<(boolean | undefined)[]> {
+  const { api } = fakeApi();
+  const watched = watchListItems(api);
+  const file = await tempFile("out.bin");
+  await get.run(
+    testContext({ api: watched.api, out: captureOutput().out }),
+    args(positionals, { ...values, output: file }),
+  );
+  return watched.calls.map(({ includeContent }) => includeContent);
+}
+
+describe("get content", () => {
+  test("inferring the file type needs content", async () => {
+    expect(await contents(["paper"])).toEqual([true]);
+  });
+
+  test("an explicit kind stays on the fast path", async () => {
+    expect(await contents(["paper"], { pdf: true })).toEqual([false]);
+    expect(await contents(["novel.epub"], { epub: true })).toEqual([false]);
+    expect(await contents(["scratch"], { zip: true })).toEqual([false]);
   });
 });

@@ -8,7 +8,7 @@ import {
 } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { TargetNotFoundError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { mkdirCommands } from "./mkdir.js";
 
 const { mkdir: mkdirCommand } = mkdirCommands;
@@ -290,5 +290,19 @@ describe("mkdir", () => {
     const { api, calls } = fakeApi();
     await mkdir.run(testContext({ api, refresh: true }), args({}, ["books"]));
     expect(calls[0]?.refresh).toBe(true);
+  });
+});
+
+describe("mkdir content", () => {
+  test("resolving a parent never fetches content", async () => {
+    const { api } = fakeApi({ items: [collection("books-id", "books")] });
+    const watched = watchListItems(api);
+    await mkdir.run(
+      testContext({ api: watched.api, out: captureOutput().out }),
+      args({ parents: true }, ["books/deep"]),
+    );
+    expect(
+      watched.calls.map(({ includeContent }) => includeContent),
+    ).not.toContain(true);
   });
 });

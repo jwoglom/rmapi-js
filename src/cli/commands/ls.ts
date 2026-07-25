@@ -54,7 +54,8 @@ const lsCommand: Command = {
       return;
     }
 
-    const items = await allEntries(ctx);
+    // only the long listing's file type column comes from an item's content
+    const items = await allEntries(ctx, { content: long });
     const render = (listings: readonly Listing[]): string =>
       long ? longList(listings, ctx.out) : shortList(listings, ctx.out);
 

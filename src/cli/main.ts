@@ -43,7 +43,9 @@ import {
   TargetNotFoundError,
   UsageError,
 } from "./error.js";
-import { output, resolveColor } from "./format.js";
+import { diagnostics, output, resolveColor } from "./format.js";
+import { interruptHandler, type Signal } from "./interrupt.js";
+import { runCommand } from "./run.js";
 
 /** every command the cli knows about, keyed by full command name */
 const registry: Registry = {
@@ -127,10 +129,29 @@ async function main(argv: readonly string[]): Promise<void> {
     env: process.env,
     cacheFile: globals.cacheFile,
   });
+  const diagnostic = diagnostics(
+    globals.verbose,
+    (text) => void process.stderr.write(text),
+  );
+
   let api: RemarkableApi | undefined;
+  // a long listing fills the cache as it goes, so a ctrl-c partway through has
+  // to persist it, otherwise the next attempt is just as slow
+  const onSignal = interruptHandler({
+    api: () => api,
+    cache: globals.cache,
+    writeCache: (dump) => store.writeCache(dump),
+    exit: (code) => process.exit(code),
+    diagnostic,
+  });
+  for (const signal of ["SIGINT", "SIGTERM"] satisfies Signal[]) {
+    process.on(signal, () => onSignal(signal));
+  }
+
   const ctx: Context = {
     ...globals,
     out,
+    diagnostic,
     config: store,
     env: process.env,
     async stdin(): Promise<string> {
@@ -153,10 +174,11 @@ async function main(argv: readonly string[]): Promise<void> {
     },
   };
 
-  await command.run(ctx, args);
-  if (api !== undefined && globals.cache) {
-    await store.writeCache(api.dumpCache());
-  }
+  await runCommand(() => command.run(ctx, args), {
+    api: () => api,
+    cache: globals.cache,
+    writeCache: (dump) => store.writeCache(dump),
+  });
 }
 
 const argv = process.argv.slice(2);

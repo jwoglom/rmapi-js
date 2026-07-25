@@ -9,7 +9,7 @@ import { type ParseArgsOptionsConfig, parseArgs } from "node:util";
 import type { RemarkableApi } from "../index.js";
 import type { ConfigStore } from "./config.js";
 import { UsageError } from "./error.js";
-import type { Output } from "./format.js";
+import type { Diagnostic, Output } from "./format.js";
 
 /** the value a single parsed flag can take */
 export type FlagValue = string | boolean | (string | boolean)[] | undefined;
@@ -69,6 +69,16 @@ export interface Context extends Globals {
   api(): Promise<RemarkableApi>;
   /** the only way to emit results */
   readonly out: Output;
+  /**
+   * emit a progress diagnostic
+   *
+   * This goes to stderr, and is a no-op unless `--verbose` was given, so
+   * commands can call it freely without checking. Results never go here; they
+   * only go through {@link Context.out | `out`}.
+   *
+   * @param message - the line to emit, without a trailing newline
+   */
+  readonly diagnostic: Diagnostic;
   /** persistent cli state */
   readonly config: ConfigStore;
   /** the environment, so commands never touch `process` */

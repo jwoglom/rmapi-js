@@ -7,7 +7,7 @@ import {
 } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { parseSet, updateCommands } from "./update.js";
 
 const { update: updateCommand } = updateCommands;
@@ -265,5 +265,19 @@ describe("update", () => {
       args({ set: ["textScale=1"] }, ["doc"]),
     );
     expect(calls[0]?.refresh).toBe(true);
+  });
+});
+
+describe("update content", () => {
+  test("never fetches content", async () => {
+    const { api } = fakeApi();
+    const watched = watchListItems(api);
+    await update.run(
+      testContext({ api: watched.api, out: captureOutput().out }),
+      args({ set: ["textScale=1"] }, ["doc"]),
+    );
+    expect(watched.calls.map(({ includeContent }) => includeContent)).toEqual([
+      false,
+    ]);
   });
 });

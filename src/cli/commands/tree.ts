@@ -63,6 +63,7 @@ const treeCommand: Command = {
     noExtra(positionals, 1, "tree");
     const depth = parseDepth(stringFlag(values, "depth"));
     const [path] = positionals;
+    // labels only need names, parents, and types, so no content is fetched
     const items = await allEntries(ctx);
     const built = buildTree(items);
 

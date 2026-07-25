@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { Entry, RemarkableApi } from "../../index.js";
 import type { Command, CommandArgs } from "../args.js";
 import { TargetNotFoundError, UsageError } from "../error.js";
-import { captureOutput, testContext } from "../test-utils.js";
+import { captureOutput, testContext, watchListItems } from "../test-utils.js";
 import { treeCommands } from "./tree.js";
 
 const { tree: treeCommand } = treeCommands;
@@ -172,5 +172,18 @@ describe("tree", () => {
     const out = await run({ depth: "1" }, [], { json: true });
     const [root] = out.json() as JsonNode[];
     expect(root?.children[0]?.children).toEqual([]);
+  });
+});
+
+describe("tree content", () => {
+  test("never fetches content", async () => {
+    const watched = watchListItems(fakeApi());
+    await tree.run(
+      testContext({ api: watched.api, out: captureOutput().out }),
+      args(),
+    );
+    expect(watched.calls.map(({ includeContent }) => includeContent)).toEqual([
+      false,
+    ]);
   });
 });

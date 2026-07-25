@@ -18,6 +18,23 @@ import { target as resolve } from "../target.js";
 /** the kinds of file `get` can download */
 type Kind = "pdf" | "epub" | "zip";
 
+/** the kinds that can be requested explicitly, in flag precedence order */
+const kinds = ["pdf", "epub", "zip"] as const;
+
+/**
+ * the kinds named explicitly on the command line
+ *
+ * When this is empty the file type has to be inferred from the document's
+ * `fileType`, which only the listing with content populates.
+ *
+ * @param values - the parsed flags
+ */
+function requestedKinds(
+  values: Readonly<Record<string, FlagValue>>,
+): readonly Kind[] {
+  return kinds.filter((kind) => boolFlag(values, kind));
+}
+
 /** the extension each kind is saved under */
 const extensions: Readonly<Record<Kind, string>> = {
   pdf: ".pdf",
@@ -36,10 +53,7 @@ function resolveKind(
   entry: Entry,
   raw: string,
 ): Kind {
-  const flags = (["pdf", "epub", "zip"] as const).filter((kind) =>
-    boolFlag(values, kind),
-  );
-  const [kind, ...extra] = flags;
+  const [kind, ...extra] = requestedKinds(values);
   if (extra.length) {
     throw new UsageError(
       `--${kind} and --${extra[0]} are mutually exclusive`,
@@ -50,6 +64,11 @@ function resolveKind(
   } else if (entry.type !== "DocumentType") {
     throw new UsageError(
       `'${raw}' is a ${entry.type === "CollectionType" ? "collection" : "template"}, which has no source file`,
+      "get",
+    );
+  } else if (entry.fileType === undefined) {
+    throw new UsageError(
+      `couldn't determine the file type of '${raw}'; pass --pdf, --epub, or --zip`,
       "get",
     );
   } else if (entry.fileType === "notebook") {
@@ -109,7 +128,10 @@ const getCommand: Command = {
     }
     noExtra(positionals, 1, "get");
 
-    const entry = await resolve(ctx, raw);
+    // without an explicit --pdf, --epub, or --zip the document's own file type
+    // decides, and that only comes from the listing when it includes content
+    const inferring = requestedKinds(values).length === 0;
+    const entry = await resolve(ctx, raw, { content: inferring });
     const kind = resolveKind(values, entry, raw);
     const output = stringFlag(values, "output");
     const file = output ?? defaultName(entry, kind);
