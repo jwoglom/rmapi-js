@@ -2,7 +2,7 @@
 import CRC32C from "crc-32/crc32c.js";
 import { z } from "zod";
 import { ValidationError } from "./error.js";
-import { concatArrays } from "./utils.js";
+import { concatArrays, fromHex, toBase64, toHex } from "./utils.js";
 
 const hashReg = /^[0-9a-f]{64}$/;
 
@@ -670,7 +670,7 @@ async function digest(buff: Uint8Array): Promise<string> {
     // NOTE this is type hinted wrong, but it does work correctly on a uint8 view
     buff as unknown as ArrayBuffer,
   );
-  return new Uint8Array(digest).toHex();
+  return toHex(new Uint8Array(digest));
 }
 
 /**
@@ -1115,7 +1115,7 @@ export class RawRemarkable implements RawRemarkableApi {
       const crc = CRC32C.buf(bytes, 0);
       const buff = new ArrayBuffer(4);
       new DataView(buff).setInt32(0, crc, false);
-      const crcHash = new Uint8Array(buff).toBase64();
+      const crcHash = toBase64(new Uint8Array(buff));
       await this.#authedFetch("PUT", `${this.#rawHost}/sync/v3/files/${hash}`, {
         body: bytes,
         headers: {
@@ -1213,7 +1213,7 @@ export class RawRemarkable implements RawRemarkableApi {
       // in schema version 3 an entry's hash is the hash of the concatenated hashes
       const hashBuffs: Uint8Array[] = [];
       for (const { hash } of sorted) {
-        hashBuffs.push(Uint8Array.fromHex(hash));
+        hashBuffs.push(fromHex(hash));
       }
       hash = await digest(concatArrays(hashBuffs));
     } else if (schemaVersion === 4) {
@@ -1239,9 +1239,9 @@ export class RawRemarkable implements RawRemarkableApi {
     mime: UploadMimeType,
   ): Promise<SimpleEntry> {
     const enc = new TextEncoder();
-    const meta = enc
-      .encode(JSON.stringify({ file_name: visibleName }))
-      .toBase64();
+    const meta = toBase64(
+      enc.encode(JSON.stringify({ file_name: visibleName })),
+    );
     const resp = await this.#authedFetch(
       "POST",
       `${this.#uploadHost}/doc/v2/files`,

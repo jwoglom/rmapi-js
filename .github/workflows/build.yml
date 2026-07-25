@@ -24,3 +24,32 @@ jobs:
         run: |
           tarball=$(npm pack --ignore-scripts --silent)
           bunx @arethetypeswrong/cli --profile esm-only "$tarball"
+
+  # bun implements things node does not, so `bun test` passing says nothing about
+  # whether this runs on the node versions `engines` claims to support. Both node
+  # breakages so far were invisible to the bun suite: an extensionless import that
+  # node's ESM resolver rejects, and Uint8Array#toHex, which exists in bun and
+  # node 24+ but not node 22 and only fails on write paths.
+  node-compat:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # the floor `engines` promises, and current
+        node: [22, 24]
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: Run the built cli on node
+        run: |
+          node dist/cli/main.js --version
+          node dist/cli/main.js --help > /dev/null
+      - name: Check node-only compatibility of the write paths
+        run: node scripts/node-compat.mjs

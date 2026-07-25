@@ -1,3 +1,72 @@
+/**
+ * hex-encode bytes
+ *
+ * @remarks
+ * This exists instead of `Uint8Array.prototype.toHex()`, which is part of the
+ * uint8array-base64/hex proposal. That is implemented in bun and in node 24+,
+ * but not in node 22, which `engines` still supports, nor in every browser this
+ * library targets. Calling it there fails at runtime with "toHex is not a
+ * function", and only on the write paths, so reads look perfectly healthy.
+ *
+ * @param bytes - the bytes to encode
+ * @returns the lowercase hex encoding, two characters per byte
+ */
+export function toHex(bytes: Uint8Array): string {
+  let res = "";
+  for (const byte of bytes) {
+    res += byte.toString(16).padStart(2, "0");
+  }
+  return res;
+}
+
+/**
+ * decode a hex string into bytes
+ *
+ * The portable counterpart to `Uint8Array.fromHex()`; see {@link toHex} for why
+ * that isn't used.
+ *
+ * @param hex - an even-length string of hex digits
+ * @returns the decoded bytes
+ * @throws if `hex` has an odd length or contains a non-hex digit, matching what
+ *   `Uint8Array.fromHex()` does rather than silently producing `NaN` bytes
+ */
+export function fromHex(hex: string): Uint8Array {
+  if (hex.length % 2 !== 0) {
+    throw new Error(
+      `hex string must have an even length, but got ${hex.length}`,
+    );
+  }
+  const res = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < res.length; ++i) {
+    const byte = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+    if (Number.isNaN(byte)) {
+      throw new Error(`invalid hex digit in '${hex}' at offset ${i * 2}`);
+    }
+    res[i] = byte;
+  }
+  return res;
+}
+
+/**
+ * base64-encode bytes
+ *
+ * The portable counterpart to `Uint8Array.prototype.toBase64()`; see
+ * {@link toHex} for why that isn't used. `btoa` is used rather than `Buffer` so
+ * this keeps working in the browser bundle.
+ *
+ * @param bytes - the bytes to encode
+ * @returns the base64 encoding
+ */
+export function toBase64(bytes: Uint8Array): string {
+  // built one character at a time rather than with String.fromCharCode(...bytes)
+  // so that a large input can't blow the argument limit
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  return btoa(binary);
+}
+
 export function concatArrays(arrays: Uint8Array[]): Uint8Array {
   const totalLength = arrays.reduce((acc, arr) => acc + arr.length, 0);
   const result = new Uint8Array(totalLength);

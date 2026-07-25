@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mapPool } from "./utils.js";
+import { fromHex, mapPool, toBase64, toHex } from "./utils.js";
 
 /** resolve after yielding to the event loop `times` times */
 async function ticks(times: number): Promise<void> {
@@ -91,5 +91,88 @@ describe("mapPool()", () => {
     await expect(mapPool([1], 0, (val) => val)).rejects.toThrow(
       "limit must be a positive integer, but got 0",
     );
+  });
+});
+
+describe("toHex()", () => {
+  test("encodes bytes", () => {
+    expect(toHex(new Uint8Array([0, 1, 15, 16, 253, 254, 255]))).toBe(
+      "00010f10fdfeff",
+    );
+  });
+
+  test("zero pads single digits", () => {
+    // the bug this guards against is a missing pad producing a short hash
+    expect(toHex(new Uint8Array([1, 2, 3]))).toBe("010203");
+  });
+
+  test("encodes empty input", () => {
+    expect(toHex(new Uint8Array([]))).toBe("");
+  });
+
+  // this mirrors digest() in raw.ts exactly. That function is module private, but
+  // it is the one that broke under node 22 when it used Uint8Array#toHex, and it
+  // produces the content hashes every write is addressed by, so a regression here
+  // corrupts uploads rather than merely erroring.
+  test("hex-encodes a sha-256 the way digest() does", async () => {
+    const enc = new TextEncoder();
+    for (const [input, expected] of [
+      [
+        "abc",
+        "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+      ],
+      ["", "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"],
+    ] as const) {
+      const buff = enc.encode(input);
+      const hashed = await crypto.subtle.digest(
+        "SHA-256",
+        buff as unknown as ArrayBuffer,
+      );
+      const hex = toHex(new Uint8Array(hashed));
+      expect(hex).toBe(expected);
+      expect(hex).toHaveLength(64);
+    }
+  });
+});
+
+describe("fromHex()", () => {
+  test("round trips with toHex", () => {
+    const bytes = new Uint8Array([0, 1, 127, 128, 254, 255]);
+    expect(fromHex(toHex(bytes))).toEqual(bytes);
+  });
+
+  test("decodes empty input", () => {
+    expect(fromHex("")).toEqual(new Uint8Array([]));
+  });
+
+  test("throws on an odd length", () => {
+    expect(() => fromHex("abc")).toThrow("even length");
+  });
+
+  test("throws on a non-hex digit", () => {
+    // parseInt would otherwise yield NaN, which coerces to a silent 0 byte
+    expect(() => fromHex("00zz")).toThrow("invalid hex digit");
+  });
+});
+
+describe("toBase64()", () => {
+  test("encodes bytes", () => {
+    expect(toBase64(new Uint8Array([0, 1, 2, 253, 254, 255]))).toBe("AAEC/f7/");
+  });
+
+  test("encodes the crc32c header the way putFile does", () => {
+    const buff = new ArrayBuffer(4);
+    new DataView(buff).setInt32(0, -1, false);
+    expect(toBase64(new Uint8Array(buff))).toBe("/////w==");
+  });
+
+  test("encodes empty input", () => {
+    expect(toBase64(new Uint8Array([]))).toBe("");
+  });
+
+  test("handles input larger than the argument limit", () => {
+    // String.fromCharCode(...bytes) would throw for an input this size
+    const big = new Uint8Array(200_000).fill(65);
+    expect(toBase64(big)).toHaveLength(Math.ceil(200_000 / 3) * 4);
   });
 });

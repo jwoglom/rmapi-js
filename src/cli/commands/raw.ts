@@ -15,6 +15,7 @@ import type {
   SchemaVersion,
   UploadMimeType,
 } from "../../index.js";
+import { toBase64 } from "../../utils.js";
 import {
   boolFlag,
   type Command,
@@ -229,7 +230,7 @@ const getHashCommand: Command = {
         fileName,
         hash,
         size: bytes.length,
-        base64: bytes.toBase64(),
+        base64: toBase64(bytes),
       };
       ctx.out.write(result, (val) => val.base64 ?? "");
     } else {
