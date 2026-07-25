@@ -1,4 +1,5 @@
-import CRC32C from "crc-32/crc32c";
+// crc-32 has no `exports` map, so node's esm resolver needs the extension
+import CRC32C from "crc-32/crc32c.js";
 import { z } from "zod";
 import { ValidationError } from "./error.js";
 import { concatArrays } from "./utils.js";

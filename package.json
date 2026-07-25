@@ -19,6 +19,9 @@
       "default": "./dist/index.js"
     }
   },
+  "bin": {
+    "rmapi": "./dist/cli/main.js"
+  },
   "unpkg": "./dist/rmapi-js.esm.min.js",
   "engines": {
     "node": ">=22"
@@ -28,6 +31,7 @@
     "./dist/**/*.d.ts"
   ],
   "scripts": {
+    "cli": "bun src/cli/main.ts",
     "doc": "typedoc",
     "doc:md": "typedoc --options typedoc.md.json && node scripts/build-docs-md.js",
     "fmt": "biome format --write",
@@ -44,9 +48,10 @@
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",
     "@types/bun": "^1.3.12",
+    "@types/node": "^26.1.1",
     "@types/uuid": "^11.0.0",
-    "typedoc-plugin-markdown": "^4.11.0",
     "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.11.0",
     "typescript": "~6.0.3"
   }
 }
