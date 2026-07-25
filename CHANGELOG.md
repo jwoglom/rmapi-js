@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [12.0.1] - 2026-07-25
+
+### Fixed
+
+- `Uint8Array#toHex`, `#toBase64` and `Uint8Array.fromHex` are no longer used.
+  They are part of the uint8array-base64/hex proposal, implemented in bun and
+  node 24+ but not in node 22, which `engines` supports, so on node 22 every
+  write failed with `TypeError: (intermediate value).toHex is not a function`.
+  Reads never reached those call sites, so an account looked healthy until the
+  first upload. Replaced by portable `toHex`/`fromHex`/`toBase64` helpers.
+  `fromHex` now rejects odd-length input and non-hex digits instead of letting
+  `parseInt`'s `NaN` become a zero byte.
+
+### Added
+
+- A `node-compat` CI job over node 22 and 24 that runs the built cli and
+  `scripts/node-compat.mjs`, which imports the built entry points through node's
+  ESM resolver and checks the digest, hex and crc32c-base64 paths against known
+  vectors. `bun test` cannot catch either of the ways this package has broken on
+  node, since bun implements both the missing resolver behavior and the missing
+  methods.
+
+## [12.0.0] - 2026-07-25
+
 This is the first release of the fork
 [jwoglom/rmapi-js](https://github.com/jwoglom/rmapi-js), published as
 `@jwoglom/rmapi-js`.
